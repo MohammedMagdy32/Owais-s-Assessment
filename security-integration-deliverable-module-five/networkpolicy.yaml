@@ -1,0 +1,77 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: app-namespace
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis
+  namespace: app-namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: nodejs-app
+    ports:
+    - protocol: TCP
+      port: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-mysql
+  namespace: app-namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: mysql
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: nodejs-app
+    ports:
+    - protocol: TCP
+      port: 3306
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-nodejs
+  namespace: app-namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: nodejs-app
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: redis
+    - podSelector:
+        matchLabels:
+          app: mysql
+    ports:
+    - protocol: TCP
+      port: 3000
+
+

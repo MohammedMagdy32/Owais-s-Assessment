@@ -1,0 +1,120 @@
+- name: Configure Nginx as a Reverse Proxy and Install SSL with Let's Encrypt
+  hosts: webservers
+  become: yes
+
+  vars:
+    domain_name: maskin-backend-dev.mywire.org
+    backend_server: 157.175.4.250
+    backend_port: 8080
+
+  tasks:
+    - name: Update and upgrade APT packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Install Certbot and Nginx plugin
+      apt:
+        name:
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Allow HTTP and HTTPS traffic through firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - 80
+        - 443
+
+    - name: Create Nginx reverse proxy configuration for HTTP
+      copy:
+        dest: /etc/nginx/sites-available/reverse_proxy
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+
+              location / {
+                  proxy_pass http://{{ backend_server }}:{{ backend_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Enable the Nginx reverse proxy configuration
+      file:
+        src: /etc/nginx/sites-available/reverse_proxy
+        dest: /etc/nginx/sites-enabled/reverse_proxy
+        state: link
+        force: yes
+
+    - name: Remove the default Nginx configuration
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+      ignore_errors: yes
+
+    - name: Fail if Nginx configuration is invalid
+      fail:
+        msg: "Nginx configuration is invalid"
+      when: nginx_test.rc != 0
+
+    - name: Reload Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: Obtain SSL certificates from Let's Encrypt
+      command: >
+        certbot --nginx -d {{ domain_name }} --non-interactive
+        --agree-tos --register-unsafely-without-email
+      notify:
+        - Update Nginx for SSL
+
+  handlers:
+    - name: Update Nginx for SSL
+      copy:
+        dest: /etc/nginx/sites-available/reverse_proxy
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name {{ domain_name }};
+
+              ssl_certificate /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/{{ domain_name }}/privkey.pem;
+
+              location / {
+                  proxy_pass http://{{ backend_server }}:{{ backend_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Reload Nginx after SSL configuration
+      service:
+        name: nginx
+        state: reloaded
+

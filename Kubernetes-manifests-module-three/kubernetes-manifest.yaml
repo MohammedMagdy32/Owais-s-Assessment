@@ -1,0 +1,141 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-namespace
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: app-namespace
+data:
+  REDIS_HOST: "<--changeme-->"
+  REDIS_PORT: "<--changeme-->"
+  MYSQL_HOST: "<--changeme-->"
+  MYSQL_PORT: "<--changeme-->"
+  MYSQL_DATABASE: "<--changeme-->"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: app-namespace
+type: Opaque
+stringData:
+  MYSQL_USER: ""
+  MYSQL_PASSWORD: ""
+---
+apiVersion: apps/v1
+kind: Deployment <-- muliple containers on one pod (redis and node app)
+metadata:
+  name: nodejs-app
+  namespace: app-namespace
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nodejs-app
+  template:
+    metadata:
+      labels:
+        app: nodejs-app
+    spec:
+      containers:
+      - name: nodejs-app
+        image: <--changeme--> 
+        ports:
+        - containerPort: 3000
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: MYSQL_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MYSQL_HOST
+        - name: MYSQL_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MYSQL_PORT
+        - name: MYSQL_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MYSQL_DATABASE
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: MYSQL_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: MYSQL_PASSWORD
+      - name: redis
+        image: redis:alpine  <--muliple container on pod--> 
+        ports:
+        - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs-app-service
+  namespace: app-namespace
+spec:
+  selector:
+    app: nodejs-app
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nodejs-app-ingress
+  namespace: app-namespace
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: <--change me--> 
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nodejs-app-service
+            port:
+              number: 3000
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nodejs-app-hpa
+  namespace: app-namespace
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nodejs-app
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
